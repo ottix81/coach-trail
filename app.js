@@ -1,7 +1,7 @@
 /* Coach Trail — PWA. Données personnelles stockées uniquement en local (localStorage). */
 (function () {
   "use strict";
-  var APP_VERSION = "1.0.0";
+  var APP_VERSION = "1.1.0";
   var KEY = "coachtrail:state:v1";
   var STATUS = { planned: "Prévue", done: "Effectuée (Strava)", modified: "Modifiée", race: "Course", rest: "Repos" };
   var JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
@@ -158,11 +158,20 @@
     var d = Math.floor(t / 864e5), h = Math.floor(t / 36e5) % 24, mi = Math.floor(t / 6e4) % 60, s = Math.floor(t / 1e3) % 60;
     el.innerHTML = [[d, "jours"], [h, "heures"], [mi, "min"], [s, "s"]].map(function (x) { return "<div><b>" + x[0] + "</b><span>" + x[1] + "</span></div>"; }).join("");
   }
+  /* ---------- Prénom (stocké uniquement en local) ---------- */
+  function firstName() { var n = state.prefs && state.prefs.firstName; return typeof n === "string" ? n : ""; }
+  function cleanName(v) { return String(v || "").replace(/[\u0000-\u001f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 30); }
+  function greeting(today, t) {
+    var p = plan(), n = firstName(), raceDay = (today && today.status === "race") || (p && p.race && p.race.date === t);
+    var msg = raceDay ? "C'est le grand jour !" : (today && today.status !== "rest") ? "Voici ta séance du jour." : "Aujourd'hui, on récupère.";
+    return '<section class="hello"><h1 id="hello">Bonjour' + (n ? " " + esc(n) : "") + ' !</h1><p id="helloMsg">' + esc(msg) + "</p>" +
+      (n ? "" : '<button class="linkbtn" data-go="settings">Ajouter ton prénom</button>') + "</section>";
+  }
   function sessionMeta(s) { return [s.km ? fkm(s.km) + " km" : "", s.minutes ? fmin(s.minutes) : "", s.dplus ? "+" + fint(s.dplus) + " m" : ""].filter(Boolean).join(" · "); }
   function viewHome() {
     var list = sessions(), t = todayISO(), today = list.filter(function (s) { return s.date === t; })[0];
     var next = list.filter(function (s) { return s.date > t && s.status !== "rest"; })[0];
-    var h = raceCard();
+    var h = greeting(today, t) + raceCard();
     h += '<section class="card today"><h2>Séance du jour <span class="small muted">' + esc(fdate(t)) + "</span></h2>";
     if (today) h += sessCardBig(today); else h += '<p class="muted">Aucune séance prévue aujourd\'hui.</p>';
     if (next && (!today || today.status === "rest")) h += '<div class="small muted" style="margin-top:12px">Prochaine séance</div>' + sessCardBig(next, true);
@@ -250,7 +259,8 @@
   }
   function viewSettings() {
     var p = plan();
-    return '<section class="card"><h2>Programme</h2>' + (p ? '<p class="small muted">' + esc(p.race.name) + " · version actuelle " + esc(versionLabel(p.currentVersion)) + "</p>" : '<p class="small muted">Aucun programme importé.</p>') +
+    return '<section class="card"><h2>Profil</h2><label for="nameIn" class="small muted">Prénom affiché sur l\'accueil</label><div class="row" style="margin-top:6px"><input id="nameIn" class="field" type="text" maxlength="30" autocomplete="given-name" autocapitalize="words" placeholder="Ton prénom" value="' + esc(firstName()) + '"><button class="btn btn-o" data-act="savename">Enregistrer</button></div><p class="small muted">Enregistré uniquement sur ce téléphone, jamais dans les fichiers du site.</p></section>' +
+      '<section class="card"><h2>Programme</h2>' + (p ? '<p class="small muted">' + esc(p.race.name) + " · version actuelle " + esc(versionLabel(p.currentVersion)) + "</p>" : '<p class="small muted">Aucun programme importé.</p>') +
       '<div class="row"><button class="btn btn-o" data-act="import">Importer un programme (.json)</button></div><p class="small muted">Les séances déjà cochées sont conservées grâce à leurs identifiants. Les versions validées ne sont jamais écrasées.</p></section>' +
       '<section class="card"><h2>Sauvegarde</h2><p class="small muted">Exporte tes cases cochées et tes programmes dans un fichier, à garder en lieu sûr (pas sur un site public).</p><div class="row"><button class="btn" data-act="backup">Exporter une sauvegarde</button><button class="btn" data-act="import">Restaurer</button></div></section>' +
       '<section class="card"><h2>Confidentialité et stockage</h2><ul class="small" style="padding-left:18px;margin:0">' +
@@ -318,6 +328,7 @@
       else if (a === "backup") download("coach-trail-sauvegarde-" + iso(new Date()) + ".json", { schema: "coach-trail-backup", schemaVersion: 1, exportedAt: new Date().toISOString(), state: state });
       else if (a === "wipe") { if (confirm("Effacer tous les programmes et toutes les cases cochées de ce téléphone ? Cette action est définitive.")) { state = blank(); save(); render(); toast("Données effacées."); } }
       else if (a === "checkupdate") checkUpdate(true);
+      else if (a === "savename") { var nv = cleanName($("nameIn").value); if (nv) state.prefs.firstName = nv; else delete state.prefs.firstName; save(); render(); toast(nv ? "Prénom enregistré : " + nv : "Prénom effacé."); }
       return;
     }
     if (t.id === "shClose" || t.id === "sheetBg") closeSheet();
@@ -328,7 +339,7 @@
     if (t.id === "verSel") { state.prefs.viewVersion = t.value; save(); render(); return; }
     if (t.dataset && t.dataset.check) { setChecked(t.dataset.check, t.checked); var open = $("sheet").classList.contains("open"); render(); if (open) openSheet(t.dataset.check); }
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); if (e.key === "Enter" && e.target.id === "nameIn") { e.preventDefault(); var b = document.querySelector('[data-act="savename"]'); if (b) b.click(); } });
 
   /* ---------- Réseau ---------- */
   function net() { $("net").hidden = navigator.onLine; }

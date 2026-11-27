@@ -111,3 +111,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @media (min-width:700px){.tabbar{max-width:720px;margin:0 auto;border-radius:16px 16px 0 0;border:1px solid var(--line)}}
 .sel{display:block;width:100%;min-width:0;margin-top:4px;text-overflow:ellipsis;-webkit-appearance:none;appearance:none;background-image:none}
 html,body{overflow-x:hidden}
+.hello{padding:4px 2px 14px}
+.hello h1{font-size:28px;margin:0}
+.hello p{margin:2px 0 0;color:var(--muted);font-size:17px}
+.linkbtn{background:none;border:0;padding:6px 0 0;color:var(--orange-2);font-size:14px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.field{flex:1;min-width:0;font:inherit;font-size:17px;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.field:focus{outline:2px solid var(--orange);outline-offset:1px}
