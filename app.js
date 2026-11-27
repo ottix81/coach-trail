@@ -1,7 +1,7 @@
 /* Coach Trail — PWA. Données personnelles stockées uniquement en local (localStorage). */
 (function () {
   "use strict";
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.2.0";
   var KEY = "coachtrail:state:v1";
   var STATUS = { planned: "Prévue", done: "Effectuée (Strava)", modified: "Modifiée", race: "Course", rest: "Repos" };
   var JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
@@ -11,10 +11,19 @@
   /* ---------- Stockage ---------- */
   var storageOK = false, mem = null;
   try { localStorage.setItem("__ct", "1"); localStorage.removeItem("__ct"); storageOK = true; } catch (e) { storageOK = false; }
-  function blank() { return { plans: {}, activePlan: null, checks: {}, prefs: { view: "home" } }; }
+  function blank() { return { plans: {}, activePlan: null, checks: {}, adapt: {}, adaptLog: {}, prefs: { view: "home" } }; }
+  /* Migration : les données enregistrées avant la 1.2.0 n'ont ni adaptations ni historique. */
+  function isObj(x) { return x && typeof x === "object" && !Array.isArray(x); }
+  function migrate(st) {
+    if (!isObj(st.checks)) st.checks = {};
+    if (!isObj(st.prefs)) st.prefs = { view: "home" };
+    if (!isObj(st.adapt)) st.adapt = {};
+    if (!isObj(st.adaptLog)) st.adaptLog = {};
+    return st;
+  }
   function load() {
     if (!storageOK) return mem || (mem = blank());
-    try { var s = JSON.parse(localStorage.getItem(KEY)); return s && s.plans ? s : blank(); } catch (e) { return blank(); }
+    try { var s = JSON.parse(localStorage.getItem(KEY)); return s && s.plans ? migrate(s) : blank(); } catch (e) { return blank(); }
   }
   function save() {
     if (!storageOK) { mem = state; return; }
@@ -42,11 +51,14 @@
   /* ---------- Modèle ---------- */
   function plan() { return state.activePlan ? state.plans[state.activePlan] : null; }
   function viewVer() { var p = plan(); if (!p) return null; var v = state.prefs.viewVersion; return (v && p.versions[v]) ? v : p.currentVersion; }
-  function sessions(vid) { var p = plan(); return p ? p.versions[vid || viewVer()].sessions : []; }
+  function sessions(vid) {
+    var p = plan(); if (!p) return []; vid = vid || viewVer(); var list = p.versions[vid].sessions;
+    return (vid === p.currentVersion && adaptStore(false)) ? list.map(applyAdapt) : list;
+  }
   function checks() { var p = plan(); if (!p) return {}; return state.checks[p.planId] || (state.checks[p.planId] = {}); }
   function isChecked(id) { return !!checks()[id]; }
   function setChecked(id, v) { var c = checks(); if (v) c[id] = { at: new Date().toISOString() }; else delete c[id]; save(); }
-  function kind(s) { return s.status === "rest" ? "rest" : (STATUS[s.status] ? s.status : "planned"); }
+  function kind(s) { if (s.adapted) return "modified"; return s.status === "rest" ? "rest" : (STATUS[s.status] ? s.status : "planned"); }
   function sum(list, opts) {
     opts = opts || {}; var r = { km: 0, dplus: 0, minutes: 0, n: 0 };
     list.forEach(function (s) {
@@ -126,7 +138,7 @@
   function importBackup(o) {
     if (o.schema !== "coach-trail-backup" || !o.state || !o.state.plans) return { ok: false, errors: ["Sauvegarde invalide."] };
     if (!confirm("Restaurer cette sauvegarde remplacera les données actuelles de l'application sur ce téléphone. Continuer ?")) return { ok: false, errors: ["Restauration annulée."] };
-    state = o.state; save(); return { ok: true, backup: true };
+    state = migrate(o.state); save(); return { ok: true, backup: true };
   }
 
   /* ---------- Rendu ---------- */
@@ -145,7 +157,7 @@
     return '<div class="card empty-state"><img src="icons/icon-192.png" alt=""><h1>Coach Trail</h1><p class="muted">Importe le programme exporté par la skill <b>coach-trail</b> (fichier <code>.json</code>). Il reste uniquement sur ce téléphone.</p><button class="btn btn-o" data-act="import">Importer un programme</button></div>' +
       '<div class="card small muted">Tes données sportives ne sont pas publiées : elles sont lues depuis le fichier que tu choisis et enregistrées dans le stockage local de l\'application.</div>';
   }
-  function legend() { return '<div class="legend"><span class="pill p-planned">Prévue</span><span class="pill p-done">Effectuée (Strava)</span><span class="pill p-modified">Modifiée</span><span class="pill p-race">Course</span><span class="pill p-check">✓ Cochée</span></div>'; }
+  function legend() { return '<div class="legend"><span class="pill p-planned">Prévue</span><span class="pill p-done">Effectuée (Strava)</span><span class="pill p-modified">Modifiée / Adaptée</span><span class="pill p-race">Course</span><span class="pill p-check">✓ Cochée</span></div>'; }
   function raceCard() {
     var p = plan(), r = p.race, g = p.goals || {};
     return '<section class="card race"><div class="eyebrow">Prochaine course</div><h1>' + esc(r.name) + '</h1><div class="facts"><span>' + esc(fdate(r.date)) + " " + D(r.date).getFullYear() + (r.start ? " · " + esc(r.start.slice(11, 16).replace(":", "h")) : "") + '</span><span><b>' + fkm(r.km) + ' km</b></span><span><b>+' + fint(r.dplus) + ' m</b></span>' + (r.place ? "<span>" + esc(r.place) + "</span>" : "") + (r.timeLimit ? "<span>Limite " + esc(r.timeLimit) + "</span>" : "") +
@@ -179,7 +191,7 @@
     var wk = weeksOf(list).filter(function (w) { return w.start === monday(t); })[0];
     if (wk) {
       var pl = sum(wk.items), dn = sum(wk.items, { checked: true }), pct = pl.km ? Math.min(100, Math.round(dn.km / pl.km * 100)) : 0;
-      h += '<section class="card"><h2>Cette semaine</h2><div class="wsum"><span><b>' + fkm(dn.km) + "</b> / " + fkm(pl.km) + " km</span><span><b>+" + fint(dn.dplus) + "</b> / " + fint(pl.dplus) + " m</span><span><b>" + dn.n + "</b> / " + pl.n + ' séances</span></div><div class="prog"><i style="width:' + pct + '%"></i></div><button class="btn btn-ghost" data-go="week" style="margin-top:8px">Voir la semaine</button></section>';
+      h += '<section class="card"><h2>Cette semaine</h2><div class="wsum"><span><b>' + fkm(dn.km) + "</b> / " + fkm(pl.km) + " km</span><span><b>+" + fint(dn.dplus) + "</b> / " + fint(pl.dplus) + " m</span><span><b>" + dn.n + "</b> / " + pl.n + ' séances</span></div><div class="prog"><i style="width:' + pct + '%"></i></div>' + (origLine(wk.items) ? '<p class="small muted" style="margin:4px 0">' + origLine(wk.items) + "</p>" : "") + '<button class="btn btn-ghost" data-go="week" style="margin-top:8px">Voir la semaine</button></section>';
     }
     var p = plan(), v = p.versions[p.currentVersion];
     if (!v.validated) h += '<div class="card small" style="border-color:var(--mod);color:var(--mod)">Programme ' + esc(v.label || v.id) + " : provisoire, non validé.</div>";
@@ -190,12 +202,12 @@
     var k = kind(s), ck = isChecked(s.id);
     return '<div class="sess' + (ck ? " checked" : "") + (s.status === "rest" ? " rest" : "") + '" style="border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:8px"><div class="bar b-' + k + '"></div>' +
       '<label class="chk">' + (s.status === "rest" ? "" : '<input type="checkbox" data-check="' + esc(s.id) + '"' + (ck ? " checked" : "") + ' aria-label="Séance terminée">') + "</label>" +
-      '<button class="sbody" data-open="' + esc(s.id) + '"><div class="srow"><span class="' + (compact ? "sdate" : "sdate now") + '">' + esc(compact ? fdate(s.date) : "Aujourd'hui") + '</span>' + (k !== "planned" && k !== "rest" ? '<span class="pill p-' + k + '">' + STATUS[k] + "</span>" : "") + '</div><div class="' + (compact ? "stype" : "big") + '">' + esc(s.type) + '</div><div class="smeta">' + esc([sessionMeta(s), s.intensity].filter(Boolean).join(" · ") || s.goal || "") + "</div></button></div>";
+      '<button class="sbody" data-open="' + esc(s.id) + '"><div class="srow"><span class="' + (compact ? "sdate" : "sdate now") + '">' + esc(compact ? fdate(s.date) : "Aujourd'hui") + '</span>' + (k !== "planned" && k !== "rest" ? '<span class="pill p-' + k + '">' + (s.adapted ? "Adaptée" : STATUS[k]) + "</span>" : "") + '</div><div class="' + (compact ? "stype" : "big") + '">' + esc(s.type) + '</div><div class="smeta">' + esc([sessionMeta(s), s.intensity].filter(Boolean).join(" · ") || s.goal || "") + "</div></button></div>" + adaptBtn(s);
   }
   function sessRow(s) {
     var k = kind(s), ck = isChecked(s.id), t = todayISO();
     return '<div class="sess' + (ck ? " checked" : "") + (s.status === "rest" ? " rest" : "") + '"><div class="bar b-' + k + '"></div><label class="chk">' + (s.status === "rest" ? "" : '<input type="checkbox" data-check="' + esc(s.id) + '"' + (ck ? " checked" : "") + ' aria-label="Séance terminée : ' + esc(fdate(s.date)) + '">') + '</label>' +
-      '<button class="sbody" data-open="' + esc(s.id) + '"><div class="srow"><span class="sdate' + (s.date === t ? " now" : "") + '">' + esc(fdate(s.date)) + (s.date === t ? " · aujourd'hui" : "") + "</span>" + (k !== "planned" && k !== "rest" ? '<span class="pill p-' + k + '">' + STATUS[k] + "</span>" : "") + '</div><div class="stype">' + esc(s.type) + '</div><div class="smeta">' + esc([sessionMeta(s), s.intensity].filter(Boolean).join(" · ") || s.goal || "") + "</div></button></div>";
+      '<button class="sbody" data-open="' + esc(s.id) + '"><div class="srow"><span class="sdate' + (s.date === t ? " now" : "") + '">' + esc(fdate(s.date)) + (s.date === t ? " · aujourd'hui" : "") + "</span>" + (k !== "planned" && k !== "rest" ? '<span class="pill p-' + k + '">' + (s.adapted ? "Adaptée" : STATUS[k]) + "</span>" : "") + '</div><div class="stype">' + esc(s.type) + '</div><div class="smeta">' + esc([sessionMeta(s), s.intensity].filter(Boolean).join(" · ") || s.goal || "") + "</div></button></div>";
   }
   function viewWeek() {
     var ws = weeksOf(sessions()); if (!ws.length) return "<p>Aucune séance.</p>";
@@ -204,12 +216,12 @@
     var i = ws.findIndex(function (w) { return w.start === cur; }), w = ws[i], pl = sum(w.items, { noRace: true }), all = sum(w.items), dn = sum(w.items, { checked: true });
     var hasRace = w.items.some(function (s) { return s.status === "race"; });
     return versionSwitch() + '<div class="wnav"><button class="btn" data-week="' + (i - 1) + '"' + (i === 0 ? " disabled" : "") + ' aria-label="Semaine précédente">‹</button><b>Semaine du ' + esc(fshort(w.start)) + " au " + esc(fshort(addDays(w.start, 6))) + '</b><button class="btn" data-week="' + (i + 1) + '"' + (i === ws.length - 1 ? " disabled" : "") + ' aria-label="Semaine suivante">›</button></div>' +
-      '<div class="wsum"><span>Prévu <b>' + fkm(pl.km) + " km</b></span><span><b>+" + fint(pl.dplus) + " m</b></span><span><b>" + fmin(pl.minutes) + "</b></span>" + (hasRace ? "<span>Course comprise : " + fkm(all.km) + " km · +" + fint(all.dplus) + " m</span>" : "") + "<span>Coché <b>" + fkm(dn.km) + " km</b></span></div>" +
+      '<div class="wsum"><span>Prévu <b>' + fkm(pl.km) + " km</b></span><span><b>+" + fint(pl.dplus) + " m</b></span><span><b>" + fmin(pl.minutes) + "</b></span>" + (hasRace ? "<span>Course comprise : " + fkm(all.km) + " km · +" + fint(all.dplus) + " m</span>" : "") + "<span>Coché <b>" + fkm(dn.km) + " km</b></span>" + origLine(w.items) + "</div>" +
       legend() + '<div class="list">' + w.items.map(sessRow).join("") + "</div>";
   }
   function versionSwitch() {
     var p = plan(); if (p.order.length < 2) return "";
-    return '<div style="margin-bottom:12px"><label class="small muted" for="verSel">Version affichée</label><select id="verSel" class="btn sel">' + p.order.map(function (id) { return '<option value="' + esc(id) + '"' + (id === viewVer() ? " selected" : "") + ">" + esc(versionLabel(id)) + (id === p.currentVersion ? " · actuelle" : "") + "</option>"; }).join("") + "</select></div>";
+    return oldVerNotice() + '<div style="margin-bottom:12px"><label class="small muted" for="verSel">Version affichée</label><select id="verSel" class="btn sel">' + p.order.map(function (id) { return '<option value="' + esc(id) + '"' + (id === viewVer() ? " selected" : "") + ">" + esc(versionLabel(id)) + (id === p.currentVersion ? " · actuelle" : "") + "</option>"; }).join("") + "</select></div>";
   }
   function viewMonth() {
     var list = sessions(), by = {}; list.forEach(function (s) { by[s.date] = s; });
@@ -237,7 +249,7 @@
     return '<ul class="diff">' + li.join("") + "</ul>";
   }
   function viewProgress() {
-    var p = plan(), list = p.versions[p.currentVersion].sessions, t = todayISO();
+    var p = plan(), list = sessions(p.currentVersion), t = todayISO();
     var past = list.filter(function (s) { return s.status !== "rest" && s.status !== "race" && s.date <= t; }), doneN = past.filter(function (s) { return isChecked(s.id) || s.status === "done"; }).length;
     var pl = sum(list, { noRace: true }), dn = sum(list, { checked: true, noRace: true }), pct = pl.km ? Math.round(dn.km / pl.km * 100) : 0;
     var h = '<section class="card"><h2>Progression</h2><div class="wsum"><span>Séances à jour : <b>' + doneN + " / " + past.length + "</b></span><span>Coché <b>" + fkm(dn.km) + " / " + fkm(pl.km) + " km</b></span><span><b>+" + fint(dn.dplus) + " / " + fint(pl.dplus) + ' m</b></span></div><div class="prog"><i style="width:' + Math.min(100, pct) + '%"></i></div><p class="small muted">Hors course. « Effectuée (Strava) » vient du dernier export ; les cases cochées sont tes propres validations.</p>' +
@@ -245,6 +257,7 @@
     var ids = {}; list.forEach(function (s) { ids[s.id] = 1; });
     var orphan = Object.keys(checks()).filter(function (id) { return !ids[id]; });
     if (orphan.length) h += '<section class="card"><h2>Séances cochées retirées du programme</h2><p class="small muted">Elles restent dans ton historique local.</p><ul class="diff">' + orphan.map(function (id) { return "<li>" + esc(id) + "</li>"; }).join("") + "</ul></section>";
+    h += adaptList() + adaptHistory();
     h += '<section class="card"><h2>Versions du programme</h2>';
     p.order.slice().reverse().forEach(function (id, idx, arr) {
       var v = p.versions[id], prevId = p.order[p.order.indexOf(id) - 1];
@@ -267,6 +280,7 @@
       "<li>Aucune donnée personnelle n'est incluse dans les fichiers du site : tout est importé et stocké <b>uniquement sur ce téléphone</b>.</li>" +
       "<li>Stockage local : " + (storageOK ? "disponible" : "<b>indisponible</b> (navigation privée ?) : les données seront perdues à la fermeture") + ".</li>" +
       "<li>Les données peuvent disparaître si tu supprimes l'application, vides les données du navigateur, ou utilises la navigation privée. Sur iPhone, l'app installée et Safari ont des stockages séparés : importe le programme depuis l'app installée.</li>" +
+      "<li>Les adaptations de séances (fatigue, météo, temps, forme) sont calculées et enregistrées <b>uniquement ici</b>, sans envoi nulle part. Elles figurent dans la sauvegarde que tu exportes.</li>" +
       "<li>Aucune connexion à Strava : aucun identifiant ni jeton n'est demandé ou enregistré.</li></ul>" +
       '<div class="row" style="margin-top:12px"><button class="btn btn-danger" data-act="wipe">Effacer toutes les données</button></div></section>' +
       '<section class="card"><h2>Application</h2><p class="small muted">Coach Trail ' + APP_VERSION + ' · <span id="swState">service worker : vérification…</span></p><div class="row"><button class="btn" data-act="checkupdate">Rechercher une mise à jour</button></div></section>';
@@ -277,18 +291,256 @@
   function openSheet(id) {
     var s = findSession(id); if (!s) return; var k = kind(s), p = plan(), ck = isChecked(id), prev = null;
     var vi = p.order.indexOf(viewVer()); if (vi > 0) prev = p.versions[p.order[vi - 1]].sessions.filter(function (x) { return x.id === id; })[0];
-    var ch = prev ? FIELDS.filter(function (f) { return (prev[f[0]] == null ? "" : prev[f[0]]) !== (s[f[0]] == null ? "" : s[f[0]]); }) : [];
-    var h = '<span class="pill p-' + (k === "rest" ? "planned" : k) + '">' + (STATUS[k] || "") + '</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + '</div><dl class="kv">' +
+    var rs = s._raw || s, ch = prev ? FIELDS.filter(function (f) { return (prev[f[0]] == null ? "" : prev[f[0]]) !== (rs[f[0]] == null ? "" : rs[f[0]]); }) : [];
+    var h = '<span class="pill p-' + (k === "rest" ? "planned" : k) + '">' + (s.adapted ? "Adaptée" : (STATUS[k] || "")) + '</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + '</div><dl class="kv">' +
       (s.km ? "<dt>Distance</dt><dd>" + fkm(s.km) + " km</dd>" : "") + (s.minutes ? "<dt>Durée</dt><dd>" + fmin(s.minutes) + "</dd>" : "") + (s.dplus ? "<dt>D+</dt><dd>+" + fint(s.dplus) + " m</dd>" : "") + (s.intensity ? "<dt>Intensité</dt><dd>" + esc(s.intensity) + "</dd>" : "") + (s.goal ? "<dt>Objectif</dt><dd>" + esc(s.goal) + "</dd>" : "") + "</dl>" +
-      (s.instructions ? '<div class="note">' + esc(s.instructions) + "</div>" : "") +
+      (s.instructions ? '<div class="note">' + esc(s.instructions) + "</div>" : "") + adaptInfo(s) +
       (ch.length ? '<div class="was"><b>Avant (' + esc(p.order[vi - 1]) + ")</b><br>" + ch.map(function (f) { return esc(f[1]) + " : " + esc(fmtField(f[0], prev[f[0]])); }).join("<br>") + "</div>" : "") +
-      (s.status === "rest" ? "" : '<label class="checkline"><input type="checkbox" class="cb" data-check="' + esc(id) + '"' + (ck ? " checked" : "") + "> Séance terminée</label>") +
+      adaptElsewhere(s) + adaptBtn(s) + askBtn(s) + (s.status === "rest" ? "" : '<label class="checkline"><input type="checkbox" class="cb" data-check="' + esc(id) + '"' + (ck ? " checked" : "") + "> Séance terminée</label>") +
       (p.intensityGuide ? '<p class="small muted">' + esc(p.intensityGuide) + "</p>" : "");
     $("shBody").innerHTML = h; $("sheet").classList.add("open"); $("sheetBg").classList.add("open");
   }
-  function closeSheet() { $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); }
+  function closeSheet() { AD = null; $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); }
 
-  /* ---------- Actions ---------- */
+  /* ---------- Adaptation de séance (calcul et stockage 100 % locaux) ---------- */
+  /* Les adaptations ne modifient jamais les versions importées : elles sont superposées à la version actuelle,
+     enregistrées dans state.adapt[planId][idSéance] (état actif) et state.adaptLog[planId] (historique séparé).
+     Rien n'est envoyé nulle part : « Demander à Claude » prépare seulement un texte à copier. */
+  var AD = null, ADF = ["type", "km", "minutes", "dplus", "intensity"];
+  var EASY = "Facile (allure conversation)";
+  var PAIN_NOTE = "Douleur signalée : aucune augmentation de volume ni d'intensité. Si la douleur persiste ou s'aggrave, arrête et demande l'avis d'un professionnel de santé.";
+  var ADAPT_REASONS = [
+    { id: "fatigue", label: "Fatigue", opts: [["light", "Un peu fatigué(e)"], ["heavy", "Très fatigué(e)"]] },
+    { id: "meteo", label: "Météo", opts: [["rain", "Pluie / terrain glissant"], ["heat", "Forte chaleur"], ["cold", "Gel / verglas"], ["storm", "Orage / vent violent"]] },
+    { id: "temps", label: "Manque de temps", opts: [["30", "30 min disponibles"], ["45", "45 min disponibles"], ["60", "1 h disponible"], ["90", "1 h 30 disponible"]] },
+    { id: "forme", label: "Forme du jour", opts: [["low", "Mauvaise forme"], ["mid", "Forme moyenne"], ["top", "Très bonne forme"]] },
+    { id: "autre", label: "Autre", opts: [["less10", "Un peu moins (−10 %)"], ["less30", "Nettement moins (−30 %)"], ["manual", "Je règle moi-même"]] }
+  ];
+  function reasonOf(id) { return ADAPT_REASONS.filter(function (r) { return r.id === id; })[0]; }
+  function optLabel(r, o) { var x = r && r.opts.filter(function (q) { return q[0] === o; })[0]; return x ? x[1] : ""; }
+  function adaptStore(create) {
+    var p = plan(); if (!p) return null;
+    if (!isObj(state.adapt)) { if (!create) return null; state.adapt = {}; }
+    if (!isObj(state.adapt[p.planId])) { if (!create) return null; state.adapt[p.planId] = {}; }
+    return state.adapt[p.planId];
+  }
+  function adaptLogOf(create) {
+    var p = plan(); if (!p) return [];
+    if (!isObj(state.adaptLog)) { if (!create) return []; state.adaptLog = {}; }
+    if (!Array.isArray(state.adaptLog[p.planId])) { if (!create) return []; state.adaptLog[p.planId] = []; }
+    return state.adaptLog[p.planId];
+  }
+  function logAdapt(entry) { var l = adaptLogOf(true); l.unshift(entry); if (l.length > 200) l.length = 200; }
+  function validA(a) { return isObj(a) && isObj(a.before) && isObj(a.after); }
+  function snap(s) { var o = {}; ADF.forEach(function (f) { o[f] = s[f] == null ? null : s[f]; }); return o; }
+  function sameSnap(a, b) { return ADF.every(function (f) { return (a[f] == null ? null : a[f]) === (b[f] == null ? null : b[f]); }); }
+  function applyAdapt(s) {
+    var st = adaptStore(false), a = st && st[s.id];
+    if (!validA(a) || !sameSnap(a.before, snap(s))) return s; /* séance modifiée par un nouvel import : adaptation ignorée */
+    var o = {}; Object.keys(s).forEach(function (k) { o[k] = s[k]; });
+    ADF.forEach(function (f) { if (a.after[f] != null) o[f] = a.after[f]; });
+    o.adapted = true; o._raw = s; o._ad = a;
+    o.instructions = "Adaptation (" + a.label + ") : " + a.note + (s.instructions ? "\n\nSéance d'origine : " + s.instructions : "");
+    return o;
+  }
+  function rawSession(id) { var p = plan(); return p ? p.versions[p.currentVersion].sessions.filter(function (x) { return x.id === id; })[0] : null; }
+  function canAdapt(s) {
+    var p = plan(); if (!p || !s) return false;
+    return (s.status === "planned" || s.status === "modified") && s.date >= todayISO() && viewVer() === p.currentVersion;
+  }
+  function adaptBtn(s) {
+    if (!canAdapt(s)) return "";
+    return '<button class="btn btn-o adapt-btn" data-adapt="' + esc(s.id) + '">' + (s.adapted ? "Adapter à nouveau" : "Adapter ma séance") + "</button>";
+  }
+  function askBtn(s) {
+    var p = plan(); if (!p || s.status === "rest" || viewVer() !== p.currentVersion) return "";
+    return '<button class="btn adapt-btn" data-ask="' + esc(s.id) + '">Demander à Claude</button>';
+  }
+  function descr(b) { return [b.type, b.km ? fkm(b.km) + " km" : "", b.minutes ? fmin(b.minutes) : "", b.dplus ? "+" + fint(b.dplus) + " m" : "", b.intensity].filter(Boolean).join(" · "); }
+  function adaptInfo(s) {
+    if (!s.adapted) return "";
+    return '<div class="was"><b>Séance adaptée (' + esc(s._ad.label) + ")</b><br>Prévu à l'origine : " + esc(descr(s._ad.before)) +
+      '<br><button class="linkbtn" data-arevert="' + esc(s.id) + '">Revenir à la séance d\'origine</button></div>';
+  }
+  /* Consultation d'une ancienne version : on signale l'adaptation de la version actuelle sans rien réécrire. */
+  function adaptElsewhere(s) {
+    var p = plan(), st = adaptStore(false), a = st && st[s.id];
+    if (!p || viewVer() === p.currentVersion || !validA(a)) return "";
+    return '<div class="was">Cette séance a été adaptée sur la version actuelle (' + esc(a.label) + ", " + esc(new Date(a.at).toLocaleDateString("fr-FR")) + "). Cette version ancienne reste affichée telle qu'importée.</div>";
+  }
+  function oldVerNotice() {
+    var p = plan(), st = adaptStore(false); if (!p || !st || viewVer() === p.currentVersion) return "";
+    var n = Object.keys(st).filter(function (id) { return validA(st[id]); }).length; if (!n) return "";
+    return '<div class="card small" style="border-color:var(--mod);color:var(--mod)">' + n + " séance" + (n > 1 ? "s" : "") + " adaptée" + (n > 1 ? "s" : "") + " sur la version actuelle. Cette ancienne version est affichée telle qu'importée, sans les adaptations.</div>";
+  }
+  function origLine(items) {
+    if (!items.some(function (s) { return s.adapted; })) return "";
+    var o = sum(items.map(function (s) { return s._raw || s; }), { noRace: true });
+    return "<span>Prévu à l'origine <b>" + fkm(o.km) + " km · +" + fint(o.dplus) + " m · " + fmin(o.minutes) + "</b></span>";
+  }
+
+  var r1 = function (x) { return Math.round(x * 10) / 10; }, r5 = function (x) { return Math.max(5, Math.round(x / 5) * 5); }, r10 = function (x) { return Math.round(x / 10) * 10; };
+  function propose(s, reason, opt, pain) {
+    var f = 1, fd = null, type = s.type, inten = s.intensity, note = "", zero = false;
+    var base = s.minutes || (s.km ? Math.round(s.km * 7) : 0), target = null;
+    if (reason === "fatigue") {
+      f = opt === "heavy" ? 0.5 : 0.8; inten = EASY;
+      note = opt === "heavy" ? "Très fatigué(e) : volume réduit de moitié, allure facile. Si la fatigue dure plusieurs jours, privilégie le repos."
+        : "Un peu fatigué(e) : volume réduit d'environ 20 %, allure facile. Arrête-toi plus tôt si les jambes restent lourdes.";
+    } else if (reason === "meteo") {
+      if (opt === "rain") { f = 0.9; fd = 0.7; inten = EASY; note = "Terrain glissant : un peu moins de distance et de dénivelé, foulée courte, prudence dans les descentes."; }
+      else if (opt === "heat") { f = 0.8; fd = 0.8; inten = EASY; note = "Forte chaleur : sors tôt ou tard, emporte de l'eau, ralentis et arrête-toi au moindre malaise."; }
+      else if (opt === "cold") { f = 0.8; fd = 0.5; inten = EASY; note = "Gel / verglas : privilégie des chemins dégagés, évite les sections exposées, échauffe-toi longuement."; }
+      else { zero = true; type = "Mobilité / renforcement léger en intérieur"; inten = "Très facile"; note = "Orage ou vent violent : ne cours pas dehors. 20 à 30 min de mobilité et de renforcement léger, ou décale la séance."; }
+    } else if (reason === "temps") {
+      target = +opt; f = base ? Math.min(1, target / base) : 1;
+      note = f < 1 ? "Séance raccourcie à " + target + " min : intensité prévue conservée, volume réduit." : "La séance tient déjà dans les " + target + " min disponibles.";
+    } else if (reason === "forme") {
+      if (opt === "low") { f = 0.7; inten = EASY; note = "Mauvaise forme : volume réduit d'environ 30 % et allure facile. Écoute ton corps."; }
+      else if (opt === "mid") { f = 0.9; note = "Forme moyenne : volume réduit d'environ 10 %, intensité inchangée mais sans forcer."; }
+      else { f = 1.1; note = "Très bonne forme : jusqu'à +10 % de volume au maximum, sans ajouter d'intensité."; }
+    } else if (reason === "autre") {
+      if (opt === "less10") { f = 0.9; note = "Volume réduit d'environ 10 %."; }
+      else if (opt === "less30") { f = 0.7; inten = EASY; note = "Volume réduit d'environ 30 %, allure facile."; }
+      else note = "Séance réglée manuellement.";
+    }
+    if (pain) { /* une douleur ne déclenche jamais une séance plus longue ou plus intense */
+      if (f > 1) f = 0.9; if (fd != null && fd > 1) fd = 0.9;
+      if (!zero) inten = EASY;
+      note = PAIN_NOTE + " " + note;
+    }
+    if (fd == null) fd = f;
+    var r = { type: type, intensity: inten, note: note, km: s.km, minutes: s.minutes, dplus: s.dplus };
+    if (zero) { if (s.km) r.km = 0; if (s.dplus) r.dplus = 0; r.minutes = Math.min(s.minutes || 30, 30); return r; }
+    if (f !== 1 || fd !== 1) {
+      if (s.km) r.km = r1(s.km * f);
+      if (s.minutes) r.minutes = target ? Math.min(s.minutes, target) : r5(s.minutes * f);
+      else if (target && f < 1) r.minutes = target;
+      if (s.dplus) r.dplus = r10(s.dplus * fd);
+    }
+    return r;
+  }
+  function openAdapt(id) {
+    var s = rawSession(id); if (!s || !canAdapt(s)) return;
+    AD = { id: id, reason: null, opt: null, pain: false, ctx: "", from: "menu" }; renderAdapt();
+    $("sheet").classList.add("open"); $("sheetBg").classList.add("open");
+  }
+  function chipRow(attr, list, cur) { return list.map(function (r) { return '<button class="chip' + (cur === r[0] ? " o" : "") + '" ' + attr + '="' + r[0] + '" aria-pressed="' + (cur === r[0]) + '">' + esc(r[1]) + "</button>"; }).join(""); }
+  function cmpRow(key, label, o, p) { return o === "" && p === "" ? "" : "<tr><td>" + label + "</td><td>" + esc(o || "—") + '</td><td id="adP-' + key + '"><b>' + esc(p || "—") + "</b></td></tr>"; }
+  function renderAdapt() {
+    var s = rawSession(AD.id); if (!s) return;
+    var h = '<span class="pill p-modified">Adapter ma séance</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + "</div>" +
+      '<p class="small muted" style="margin-top:14px">Pourquoi veux-tu adapter cette séance ?</p><div class="chips">' + chipRow("data-ar", ADAPT_REASONS.map(function (r) { return [r.id, r.label]; }), AD.reason) + "</div>" +
+      '<label class="checkline" style="font-size:15px;margin-top:12px"><input type="checkbox" class="cb" id="adPain"' + (AD.pain ? " checked" : "") + "> J'ai une douleur (articulation, tendon, muscle…)</label>";
+    var rs = reasonOf(AD.reason);
+    if (rs) h += '<div class="opts">' + rs.opts.map(function (o) { return '<button class="btn' + (AD.opt === o[0] ? " sel-on" : "") + '" data-ao="' + o[0] + '" aria-pressed="' + (AD.opt === o[0]) + '">' + esc(o[1]) + "</button>"; }).join("") + "</div>";
+    if (rs && AD.opt) {
+      var r = propose(s, AD.reason, AD.opt, AD.pain);
+      h += '<div class="note" style="margin-top:14px">' + esc(r.note) + "</div>" +
+        '<h3 style="font-size:16px;margin-top:14px">Originale / proposée</h3><table class="cmp"><thead><tr><th></th><th>Originale</th><th>Proposée</th></tr></thead><tbody>' +
+        cmpRow("type", "Séance", s.type, r.type) + cmpRow("km", "Distance", s.km ? fkm(s.km) + " km" : "", r.km ? fkm(r.km) + " km" : (s.km ? "0 km" : "")) +
+        cmpRow("min", "Durée", s.minutes ? fmin(s.minutes) : "", r.minutes ? fmin(r.minutes) : "") + cmpRow("dp", "D+", s.dplus ? "+" + fint(s.dplus) + " m" : "", r.dplus ? "+" + fint(r.dplus) + " m" : (s.dplus ? "0 m" : "")) +
+        cmpRow("int", "Intensité", s.intensity || "", r.intensity || "") + '</tbody></table>' +
+        '<h3 style="font-size:16px;margin-top:14px">Modifier à la main</h3><div class="adfields">' +
+        (s.km ? '<label>Distance (km)<input id="adKm" class="field" type="number" inputmode="decimal" min="0" step="0.1" value="' + r.km + '"></label>' : "") +
+        (s.minutes ? '<label>Durée (min)<input id="adMin" class="field" type="number" inputmode="numeric" min="0" step="5" value="' + r.minutes + '"></label>' : "") +
+        (s.dplus ? '<label>D+ (m)<input id="adDp" class="field" type="number" inputmode="numeric" min="0" step="10" value="' + r.dplus + '"></label>' : "") +
+        '<label style="grid-column:1/-1">Intensité<input id="adInt" class="field" type="text" maxlength="60" value="' + esc(r.intensity || "") + '" placeholder="Ex. Facile, Seuil…"></label></div>' +
+        '<p class="small muted">' + (AD.pain ? "Douleur signalée : aucune valeur ne peut dépasser la séance prévue." : "Maximum +10 % par rapport au prévu.") + " Enregistré uniquement sur ce téléphone ; la séance d'origine reste récupérable. Ces conseils généraux ne remplacent pas un avis médical.</p>" +
+        '<div class="row"><button class="btn btn-o" data-aapply="1">Appliquer</button><button class="btn" data-ask="' + esc(s.id) + '">Demander à Claude</button><button class="btn" data-aback="' + esc(s.id) + '">Annuler</button></div>';
+    } else h += '<div class="row" style="margin-top:14px"><button class="btn" data-ask="' + esc(s.id) + '">Demander à Claude</button><button class="btn" data-aback="' + esc(s.id) + '">Retour</button></div>';
+    $("shBody").innerHTML = h;
+  }
+  /* Valeurs saisies. strict=true : validation (nombres positifs, plafond +10 % ou aucune hausse si douleur). */
+  function formVals(s, r, strict) {
+    var out = { km: r.km, minutes: r.minutes, dplus: r.dplus, intensity: r.intensity }, err = null;
+    [["km", "adKm", "Distance", 10], ["minutes", "adMin", "Durée", 1], ["dplus", "adDp", "D+", 1]].forEach(function (c) {
+      if (!s[c[0]] || !$(c[1])) return;
+      var v = parseFloat(String($(c[1]).value).replace(",", "."));
+      if (!isFinite(v) || v < 0) { if (strict && !err) err = c[2] + " : saisis un nombre positif."; return; }
+      var cap = AD.pain ? s[c[0]] : Math.ceil(s[c[0]] * 1.1 * 10) / 10;
+      if (strict && v > cap && !err) err = c[2] + " : " + (AD.pain ? "pas d'augmentation en cas de douleur" : "maximum +10 % du prévu") + ".";
+      out[c[0]] = c[0] === "km" ? r1(v) : Math.round(v);
+    });
+    if ($("adInt")) { var iv = String($("adInt").value).replace(/[\u0000-\u001f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 60); out.intensity = iv || s.intensity || null; }
+    out.err = err; return out;
+  }
+  function updatePreview() {
+    if (!AD || !AD.opt) return; var s = rawSession(AD.id); if (!s) return;
+    var v = formVals(s, propose(s, AD.reason, AD.opt, AD.pain), false);
+    var set = function (k, t) { var el = $("adP-" + k); if (el) el.innerHTML = "<b>" + esc(t || "—") + "</b>"; };
+    set("km", s.km ? fkm(v.km) + " km" : ""); set("min", s.minutes ? fmin(v.minutes) : ""); set("dp", s.dplus ? "+" + fint(v.dplus) + " m" : ""); set("int", v.intensity || "");
+  }
+  function applyAdaptForm() {
+    if (!AD || !AD.opt) return; var s = rawSession(AD.id); if (!s) return;
+    var r = propose(s, AD.reason, AD.opt, AD.pain), v = formVals(s, r, true);
+    if (v.err) { toast(v.err); return; }
+    var after = { type: r.type, km: v.km, minutes: v.minutes, dplus: v.dplus, intensity: v.intensity };
+    if (sameSnap(snap(s), snap(after))) { toast("Aucun changement par rapport à la séance prévue."); return; }
+    var rs = reasonOf(AD.reason), st = adaptStore(true), label = rs.label.toLowerCase() + (AD.pain ? " + douleur" : ""), now = new Date().toISOString();
+    st[s.id] = { at: now, reason: AD.reason, label: label, note: r.note, pain: !!AD.pain, before: snap(s), after: after };
+    logAdapt({ at: now, sessionId: s.id, date: s.date, type: s.type, label: label, action: "adaptée", before: snap(s), after: after });
+    save(); var id = s.id; AD = null; render(); openSheet(id); toast("Séance adaptée. Tu peux revenir à l'original à tout moment.");
+  }
+  function revertAdapt(id) {
+    var st = adaptStore(false), a = st && st[id]; if (!a) return;
+    var raw = rawSession(id);
+    logAdapt({ at: new Date().toISOString(), sessionId: id, date: raw ? raw.date : "", type: raw ? raw.type : id, label: a.label || "", action: "annulée", before: a.after || {}, after: a.before || {} });
+    delete st[id]; save(); var open = $("sheet").classList.contains("open"); render(); if (open && findSession(id)) openSheet(id); toast("Séance d'origine rétablie.");
+  }
+  function adaptList() {
+    var st = adaptStore(false); if (!st) return "";
+    var li = Object.keys(st).filter(function (id) { return validA(st[id]); }).map(function (id) { var raw = rawSession(id); return raw ? { id: id, raw: raw, a: st[id] } : null; }).filter(Boolean)
+      .sort(function (x, y) { return x.raw.date < y.raw.date ? -1 : 1; });
+    if (!li.length) return "";
+    return '<section class="card"><h2>Séances adaptées</h2><p class="small muted">Adaptations actives, enregistrées sur ce téléphone. Les versions importées ne sont jamais modifiées.</p><ul class="diff">' + li.map(function (x) {
+      var on = sameSnap(x.a.before, snap(x.raw));
+      return "<li><b>" + esc(fdate(x.raw.date)) + " · " + esc(x.raw.type) + '</b> <span class="pill p-modified">' + esc(x.a.label) + "</span>" + (on ? "" : ' <span class="pill p-removed">non appliquée</span>') +
+        '<br><span class="small muted">' + (on ? "Prévu : " + esc(descr(x.a.before)) + "<br>Adapté : " + esc(descr(x.a.after)) : "La séance a changé dans la version importée : l'adaptation est ignorée.") + '</span><br><button class="linkbtn" data-arevert="' + esc(x.id) + '">' + (on ? "Revenir à l'original" : "Supprimer") + "</button></li>";
+    }).join("") + "</ul></section>";
+  }
+  function adaptHistory() {
+    var l = adaptLogOf(false).filter(function (e) { return isObj(e); }); if (!l.length) return "";
+    return '<section class="card"><h2>Historique des adaptations</h2><p class="small muted">Séparé de l\'historique des versions : les programmes importés restent intacts.</p><ul class="diff small">' + l.slice(0, 30).map(function (e) {
+      return "<li>" + esc(new Date(e.at).toLocaleString("fr-FR")) + " · <b>" + esc(e.action) + "</b> · " + esc(e.date ? fdate(e.date) : "") + " · " + esc(e.type) + ' <span class="pill p-modified">' + esc(e.label) + "</span><br>" + esc(descr(e.before || {})) + " → <b>" + esc(descr(e.after || {})) + "</b></li>";
+    }).join("") + "</ul></section>";
+  }
+
+  /* ---------- Demander à Claude : texte à copier, rien n'est envoyé ---------- */
+  function openAsk(id) {
+    var s = rawSession(id) || findSession(id); if (!s) return;
+    if (!AD || AD.id !== id) AD = { id: id, reason: null, opt: null, pain: false, ctx: "", from: "sheet" };
+    AD.view = "ask"; renderAsk(); $("sheet").classList.add("open"); $("sheetBg").classList.add("open");
+  }
+  function askText(s) {
+    var p = plan(), rs = reasonOf(AD.reason), cur = s;
+    var l = ["Utilise la skill coach-trail.", "",
+      "Je veux adapter une séance de mon programme « " + p.race.name + " » (version " + p.currentVersion + ").", "",
+      "Séance : " + fdate(s.date) + " · " + descr(cur) + (s.goal ? " · objectif : " + s.goal : ""),
+      "Raison : " + (rs ? rs.label + (AD.opt ? " (" + optLabel(rs, AD.opt) + ")" : "") : "à préciser"),
+      "Douleur : " + (AD.pain ? "oui, je ressens une douleur" : "non signalée")];
+    if (AD.ctx) l.push("Précisions : " + AD.ctx);
+    l.push("", "Demande :", "- Analyse mes dernières activités Strava et mon état de forme.",
+      "- Propose une adaptation prudente de cette séance" + (AD.pain ? " (douleur signalée : ne propose ni plus long ni plus intense ; recommande un avis médical si elle persiste)" : "") + ", et ajuste les séances suivantes de la semaine si nécessaire.",
+      "- Exporte un nouveau fichier JSON coach-trail-plan (nouvelle version) que j'importerai dans l'application.");
+    return l.join("\n");
+  }
+  function renderAsk() {
+    var s = rawSession(AD.id) || findSession(AD.id); if (!s) return;
+    $("shBody").innerHTML = '<span class="pill p-check">Demander à Claude</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + "</div>" +
+      '<p class="small muted" style="margin-top:12px">Copie ce texte puis colle-le toi-même dans Claude (skill <b>coach-trail</b>). <b>Rien n\'est envoyé automatiquement</b> : l\'application n\'est connectée ni à Strava ni à une IA. Relis le texte avant de le coller.</p>' +
+      '<label class="small muted" for="adCtx">Précisions (facultatif)</label><input id="adCtx" class="field" type="text" maxlength="200" value="' + esc(AD.ctx) + '" placeholder="Ex. voyage jeudi, genou sensible…" style="width:100%;margin:4px 0 10px">' +
+      '<textarea id="adPrompt" class="field" rows="10" readonly style="width:100%;font-size:14px">' + esc(askText(s)) + '</textarea>' +
+      '<div class="row" style="margin-top:12px"><button class="btn btn-o" data-acopy="1">Copier le texte</button><button class="btn" data-aaskback="1">Retour</button></div>';
+  }
+  function copyAsk() {
+    var ta = $("adPrompt"); if (!ta) return;
+    var ok = function () { toast("Texte copié. Colle-le dans Claude."); }, fail = function () { ta.focus(); ta.select(); toast("Sélectionne et copie le texte manuellement."); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(ok, function () { try { ta.select(); document.execCommand("copy") ? ok() : fail(); } catch (e) { fail(); } });
+    else { try { ta.focus(); ta.select(); document.execCommand("copy") ? ok() : fail(); } catch (e) { fail(); } }
+  }
+
+/* ---------- Actions ---------- */
   function download(name, obj) {
     var blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
     try { var f = new File([blob], name, { type: "application/json" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { navigator.share({ files: [f], title: name }).catch(function () {}); return; } } catch (e) {}
@@ -318,6 +570,15 @@
     var t = e.target, el;
     if ((el = t.closest(".tabbar button"))) { setView(el.dataset.v); return; }
     if ((el = t.closest("[data-go]"))) { setView(el.dataset.go); return; }
+    if ((el = t.closest("[data-adapt]"))) { openAdapt(el.dataset.adapt); return; }
+    if ((el = t.closest("[data-ar]"))) { if (AD) { AD.reason = el.dataset.ar; AD.opt = null; renderAdapt(); } return; }
+    if ((el = t.closest("[data-ao]"))) { if (AD) { AD.opt = el.dataset.ao; renderAdapt(); } return; }
+    if ((el = t.closest("[data-aapply]"))) { applyAdaptForm(); return; }
+    if ((el = t.closest("[data-aback]"))) { AD = null; openSheet(el.dataset.aback); return; }
+    if ((el = t.closest("[data-ask]"))) { openAsk(el.dataset.ask); return; }
+    if ((el = t.closest("[data-acopy]"))) { copyAsk(); return; }
+    if ((el = t.closest("[data-aaskback]"))) { var bid = AD && AD.id; if (AD && AD.from === "menu") { AD.view = null; renderAdapt(); } else { AD = null; if (bid) openSheet(bid); } return; }
+    if ((el = t.closest("[data-arevert]"))) { revertAdapt(el.dataset.arevert); return; }
     if ((el = t.closest("[data-open]"))) { openSheet(el.dataset.open); return; }
     if ((el = t.closest("[data-week]"))) { var ws = weeksOf(sessions()), i = +el.dataset.week; if (ws[i]) { state.prefs.weekStart = ws[i].start; save(); render(); } return; }
     if ((el = t.closest("[data-month]"))) { var ms = []; sessions().forEach(function (s) { var k = s.date.slice(0, 7); if (ms.indexOf(k) < 0) ms.push(k); }); ms.sort(); if (ms[+el.dataset.month]) { state.prefs.month = ms[+el.dataset.month]; save(); render(); } return; }
@@ -336,8 +597,14 @@
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (t.id === "fileIn") { if (t.files[0]) handleFile(t.files[0]); t.value = ""; return; }
+    if (t.id === "adPain" && AD) { AD.pain = t.checked; renderAdapt(); return; }
     if (t.id === "verSel") { state.prefs.viewVersion = t.value; save(); render(); return; }
     if (t.dataset && t.dataset.check) { setChecked(t.dataset.check, t.checked); var open = $("sheet").classList.contains("open"); render(); if (open) openSheet(t.dataset.check); }
+  });
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t.id === "adCtx" && AD) { AD.ctx = t.value.replace(/[\u0000-\u001f<>]/g, ""); var s = rawSession(AD.id) || findSession(AD.id); if (s && $("adPrompt")) $("adPrompt").value = askText(s); }
+    else if (t.id === "adKm" || t.id === "adMin" || t.id === "adDp" || t.id === "adInt") updatePreview();
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); if (e.key === "Enter" && e.target.id === "nameIn") { e.preventDefault(); var b = document.querySelector('[data-act="savename"]'); if (b) b.click(); } });
 

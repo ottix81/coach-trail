@@ -117,3 +117,15 @@ html,body{overflow-x:hidden}
 .linkbtn{background:none;border:0;padding:6px 0 0;color:var(--orange-2);font-size:14px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
 .field{flex:1;min-width:0;font:inherit;font-size:17px;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .field:focus{outline:2px solid var(--orange);outline-offset:1px}
+
+/* Adaptation de séance */
+.adapt-btn{display:block;width:100%;margin-top:10px;min-height:46px}
+button.chip{font:inherit;font-size:14px;color:inherit;cursor:pointer;min-height:44px;padding:8px 14px}
+.opts{display:grid;gap:8px;margin-top:12px}
+.opts .btn{text-align:left;min-height:46px}
+.opts .btn.sel-on{border-color:var(--orange);background:var(--orange-bg);color:var(--orange-2)}
+.adfields{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:10px 0}
+.adfields label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.adfields .field{width:100%}
+.cmp{font-size:14px;margin-top:6px}.cmp td:first-child{color:var(--muted)}
+textarea.field{resize:vertical;line-height:1.4}
