@@ -1,7 +1,7 @@
 /* Coach Trail — service worker.
    Met en cache uniquement les fichiers de l'application (aucune donnée personnelle).
    Pour publier une mise à jour : modifier CACHE_VERSION. L'ancien cache est supprimé à l'activation. */
-const CACHE_VERSION = "coach-trail-v1.2.0";
+const CACHE_VERSION = "coach-trail-v1.2.1";
 const APP_SHELL = [
   "./",
   "./index.html",
