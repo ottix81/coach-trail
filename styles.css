@@ -129,3 +129,6 @@ button.chip{font:inherit;font-size:14px;color:inherit;cursor:pointer;min-height:
 .adfields .field{width:100%}
 .cmp{font-size:14px;margin-top:6px}.cmp td:first-child{color:var(--muted)}
 textarea.field{resize:vertical;line-height:1.4}
+.warn{margin:12px 0;padding:12px;border-radius:12px;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.45);font-size:14px}
+.warn ul{margin:6px 0;padding-left:18px}.warn p{margin:6px 0 10px}
+input[type=time].field{min-height:46px}

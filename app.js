@@ -1,7 +1,7 @@
 /* Coach Trail — PWA. Données personnelles stockées uniquement en local (localStorage). */
 (function () {
   "use strict";
-  var APP_VERSION = "1.2.0";
+  var APP_VERSION = "1.2.1";
   var KEY = "coachtrail:state:v1";
   var STATUS = { planned: "Prévue", done: "Effectuée (Strava)", modified: "Modifiée", race: "Course", rest: "Repos" };
   var JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
@@ -179,7 +179,7 @@
     return '<section class="hello"><h1 id="hello">Bonjour' + (n ? " " + esc(n) : "") + ' !</h1><p id="helloMsg">' + esc(msg) + "</p>" +
       (n ? "" : '<button class="linkbtn" data-go="settings">Ajouter ton prénom</button>') + "</section>";
   }
-  function sessionMeta(s) { return [s.km ? fkm(s.km) + " km" : "", s.minutes ? fmin(s.minutes) : "", s.dplus ? "+" + fint(s.dplus) + " m" : ""].filter(Boolean).join(" · "); }
+  function sessionMeta(s) { return [s.time ? String(s.time).replace(":", "h") : "", s.km ? fkm(s.km) + " km" : "", s.minutes ? fmin(s.minutes) : "", s.dplus ? "+" + fint(s.dplus) + " m" : ""].filter(Boolean).join(" · "); }
   function viewHome() {
     var list = sessions(), t = todayISO(), today = list.filter(function (s) { return s.date === t; })[0];
     var next = list.filter(function (s) { return s.date > t && s.status !== "rest"; })[0];
@@ -293,7 +293,7 @@
     var vi = p.order.indexOf(viewVer()); if (vi > 0) prev = p.versions[p.order[vi - 1]].sessions.filter(function (x) { return x.id === id; })[0];
     var rs = s._raw || s, ch = prev ? FIELDS.filter(function (f) { return (prev[f[0]] == null ? "" : prev[f[0]]) !== (rs[f[0]] == null ? "" : rs[f[0]]); }) : [];
     var h = '<span class="pill p-' + (k === "rest" ? "planned" : k) + '">' + (s.adapted ? "Adaptée" : (STATUS[k] || "")) + '</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + '</div><dl class="kv">' +
-      (s.km ? "<dt>Distance</dt><dd>" + fkm(s.km) + " km</dd>" : "") + (s.minutes ? "<dt>Durée</dt><dd>" + fmin(s.minutes) + "</dd>" : "") + (s.dplus ? "<dt>D+</dt><dd>+" + fint(s.dplus) + " m</dd>" : "") + (s.intensity ? "<dt>Intensité</dt><dd>" + esc(s.intensity) + "</dd>" : "") + (s.goal ? "<dt>Objectif</dt><dd>" + esc(s.goal) + "</dd>" : "") + "</dl>" +
+      (s.time ? "<dt>Horaire</dt><dd>" + esc(String(s.time).replace(":", "h")) + "</dd>" : "") + (s.km ? "<dt>Distance</dt><dd>" + fkm(s.km) + " km</dd>" : "") + (s.minutes ? "<dt>Durée</dt><dd>" + fmin(s.minutes) + "</dd>" : "") + (s.dplus ? "<dt>D+</dt><dd>+" + fint(s.dplus) + " m</dd>" : "") + (s.intensity ? "<dt>Intensité</dt><dd>" + esc(s.intensity) + "</dd>" : "") + (s.goal ? "<dt>Objectif</dt><dd>" + esc(s.goal) + "</dd>" : "") + "</dl>" +
       (s.instructions ? '<div class="note">' + esc(s.instructions) + "</div>" : "") + adaptInfo(s) +
       (ch.length ? '<div class="was"><b>Avant (' + esc(p.order[vi - 1]) + ")</b><br>" + ch.map(function (f) { return esc(f[1]) + " : " + esc(fmtField(f[0], prev[f[0]])); }).join("<br>") + "</div>" : "") +
       adaptElsewhere(s) + adaptBtn(s) + askBtn(s) + (s.status === "rest" ? "" : '<label class="checkline"><input type="checkbox" class="cb" data-check="' + esc(id) + '"' + (ck ? " checked" : "") + "> Séance terminée</label>") +
@@ -306,7 +306,7 @@
   /* Les adaptations ne modifient jamais les versions importées : elles sont superposées à la version actuelle,
      enregistrées dans state.adapt[planId][idSéance] (état actif) et state.adaptLog[planId] (historique séparé).
      Rien n'est envoyé nulle part : « Demander à Claude » prépare seulement un texte à copier. */
-  var AD = null, ADF = ["type", "km", "minutes", "dplus", "intensity"];
+  var AD = null, ADF = ["type", "time", "km", "minutes", "dplus", "intensity"];
   var EASY = "Facile (allure conversation)";
   var PAIN_NOTE = "Douleur signalée : aucune augmentation de volume ni d'intensité. Si la douleur persiste ou s'aggrave, arrête et demande l'avis d'un professionnel de santé.";
   var ADAPT_REASONS = [
@@ -356,7 +356,8 @@
     var p = plan(); if (!p || s.status === "rest" || viewVer() !== p.currentVersion) return "";
     return '<button class="btn adapt-btn" data-ask="' + esc(s.id) + '">Demander à Claude</button>';
   }
-  function descr(b) { return [b.type, b.km ? fkm(b.km) + " km" : "", b.minutes ? fmin(b.minutes) : "", b.dplus ? "+" + fint(b.dplus) + " m" : "", b.intensity].filter(Boolean).join(" · "); }
+  function ftime(t) { return String(t || "").replace(":", "h"); }
+  function descr(b) { return [b.type, b.time ? ftime(b.time) : "", b.km ? fkm(b.km) + " km" : "", b.minutes ? fmin(b.minutes) : "", b.dplus ? "+" + fint(b.dplus) + " m" : "", b.intensity].filter(Boolean).join(" · "); }
   function adaptInfo(s) {
     if (!s.adapted) return "";
     return '<div class="was"><b>Séance adaptée (' + esc(s._ad.label) + ")</b><br>Prévu à l'origine : " + esc(descr(s._ad.before)) +
@@ -426,7 +427,7 @@
     $("sheet").classList.add("open"); $("sheetBg").classList.add("open");
   }
   function chipRow(attr, list, cur) { return list.map(function (r) { return '<button class="chip' + (cur === r[0] ? " o" : "") + '" ' + attr + '="' + r[0] + '" aria-pressed="' + (cur === r[0]) + '">' + esc(r[1]) + "</button>"; }).join(""); }
-  function cmpRow(key, label, o, p) { return o === "" && p === "" ? "" : "<tr><td>" + label + "</td><td>" + esc(o || "—") + '</td><td id="adP-' + key + '"><b>' + esc(p || "—") + "</b></td></tr>"; }
+  function cmpRow(key, label, o, p) { return "<tr><td>" + label + "</td><td>" + esc(o || "—") + '</td><td id="adP-' + key + '"><b>' + esc(p || "—") + "</b></td></tr>"; }
   function renderAdapt() {
     var s = rawSession(AD.id); if (!s) return;
     var h = '<span class="pill p-modified">Adapter ma séance</span><h3 id="shTitle">' + esc(s.type) + '</h3><div class="muted">' + esc(fdate(s.date)) + "</div>" +
@@ -435,52 +436,82 @@
     var rs = reasonOf(AD.reason);
     if (rs) h += '<div class="opts">' + rs.opts.map(function (o) { return '<button class="btn' + (AD.opt === o[0] ? " sel-on" : "") + '" data-ao="' + o[0] + '" aria-pressed="' + (AD.opt === o[0]) + '">' + esc(o[1]) + "</button>"; }).join("") + "</div>";
     if (rs && AD.opt) {
-      var r = propose(s, AD.reason, AD.opt, AD.pain);
+      var r = propose(s, AD.reason, AD.opt, AD.pain), pick = function (k) { var v = AD.man && AD.man[k] != null ? AD.man[k] : r[k]; return v == null ? "" : v; };
       h += '<div class="note" style="margin-top:14px">' + esc(r.note) + "</div>" +
         '<h3 style="font-size:16px;margin-top:14px">Originale / proposée</h3><table class="cmp"><thead><tr><th></th><th>Originale</th><th>Proposée</th></tr></thead><tbody>' +
-        cmpRow("type", "Séance", s.type, r.type) + cmpRow("km", "Distance", s.km ? fkm(s.km) + " km" : "", r.km ? fkm(r.km) + " km" : (s.km ? "0 km" : "")) +
-        cmpRow("min", "Durée", s.minutes ? fmin(s.minutes) : "", r.minutes ? fmin(r.minutes) : "") + cmpRow("dp", "D+", s.dplus ? "+" + fint(s.dplus) + " m" : "", r.dplus ? "+" + fint(r.dplus) + " m" : (s.dplus ? "0 m" : "")) +
-        cmpRow("int", "Intensité", s.intensity || "", r.intensity || "") + '</tbody></table>' +
+        cmpRow("type", "Séance", s.type, r.type) + cmpRow("time", "Horaire", s.time ? ftime(s.time) : "", "") + cmpRow("km", "Distance", s.km ? fkm(s.km) + " km" : "", "") +
+        cmpRow("min", "Durée", s.minutes ? fmin(s.minutes) : "", "") + cmpRow("dp", "D+", s.dplus ? "+" + fint(s.dplus) + " m" : "", "") + cmpRow("int", "Intensité", s.intensity || "", "") + '</tbody></table>' +
         '<h3 style="font-size:16px;margin-top:14px">Modifier à la main</h3><div class="adfields">' +
-        (s.km ? '<label>Distance (km)<input id="adKm" class="field" type="number" inputmode="decimal" min="0" step="0.1" value="' + r.km + '"></label>' : "") +
-        (s.minutes ? '<label>Durée (min)<input id="adMin" class="field" type="number" inputmode="numeric" min="0" step="5" value="' + r.minutes + '"></label>' : "") +
-        (s.dplus ? '<label>D+ (m)<input id="adDp" class="field" type="number" inputmode="numeric" min="0" step="10" value="' + r.dplus + '"></label>' : "") +
-        '<label style="grid-column:1/-1">Intensité<input id="adInt" class="field" type="text" maxlength="60" value="' + esc(r.intensity || "") + '" placeholder="Ex. Facile, Seuil…"></label></div>' +
-        '<p class="small muted">' + (AD.pain ? "Douleur signalée : aucune valeur ne peut dépasser la séance prévue." : "Maximum +10 % par rapport au prévu.") + " Enregistré uniquement sur ce téléphone ; la séance d'origine reste récupérable. Ces conseils généraux ne remplacent pas un avis médical.</p>" +
+        '<label>Distance (km)<input id="adKm" class="field" type="number" inputmode="decimal" min="0" step="0.1" value="' + pick("km") + '"></label>' +
+        '<label>Durée (min)<input id="adMin" class="field" type="number" inputmode="numeric" min="0" step="5" value="' + pick("minutes") + '"></label>' +
+        '<label>D+ (m)<input id="adDp" class="field" type="number" inputmode="numeric" min="0" step="10" value="' + pick("dplus") + '"></label>' +
+        '<label>Horaire<input id="adTime" class="field" type="time" value="' + esc(pick("time")) + '"></label>' +
+        '<label style="grid-column:1/-1">Intensité<input id="adInt" class="field" type="text" maxlength="60" value="' + esc(pick("intensity")) + '" placeholder="Ex. Facile, Moyenne, Seuil…"></label></div>' +
+        '<p class="small muted">' + (AD.pain ? "Douleur signalée : aucune augmentation n'est possible, seulement des réductions ou des changements d'horaire / d'intensité." : "Les suggestions automatiques sont limitées à +10 %. En modification manuelle tu choisis librement, mais une augmentation importante demande une confirmation.") +
+        " Enregistré uniquement sur ce téléphone ; la séance d'origine reste récupérable. Ces conseils généraux ne remplacent pas un avis médical.</p>" +
+        '<div id="adWarn" aria-live="polite"></div>' +
         '<div class="row"><button class="btn btn-o" data-aapply="1">Appliquer</button><button class="btn" data-ask="' + esc(s.id) + '">Demander à Claude</button><button class="btn" data-aback="' + esc(s.id) + '">Annuler</button></div>';
     } else h += '<div class="row" style="margin-top:14px"><button class="btn" data-ask="' + esc(s.id) + '">Demander à Claude</button><button class="btn" data-aback="' + esc(s.id) + '">Retour</button></div>';
     $("shBody").innerHTML = h;
+    if (rs && AD.opt) updatePreview();
   }
-  /* Valeurs saisies. strict=true : validation (nombres positifs, plafond +10 % ou aucune hausse si douleur). */
+  var NUMF = [["km", "adKm", "Distance", "km"], ["minutes", "adMin", "Durée", "min"], ["dplus", "adDp", "D+", "m"]];
+  /* Valeurs saisies (champ vide = valeur proposée). Aucun plafond en saisie manuelle :
+     les augmentations sont listées dans `incs` (big = au-delà de +10 %). */
   function formVals(s, r, strict) {
-    var out = { km: r.km, minutes: r.minutes, dplus: r.dplus, intensity: r.intensity }, err = null;
-    [["km", "adKm", "Distance", 10], ["minutes", "adMin", "Durée", 1], ["dplus", "adDp", "D+", 1]].forEach(function (c) {
-      if (!s[c[0]] || !$(c[1])) return;
-      var v = parseFloat(String($(c[1]).value).replace(",", "."));
+    var out = { type: r.type, km: r.km, minutes: r.minutes, dplus: r.dplus, time: r.time || s.time || null, intensity: r.intensity }, err = null;
+    NUMF.forEach(function (c) {
+      var el = $(c[1]); if (!el || String(el.value).trim() === "") return;
+      var v = parseFloat(String(el.value).replace(",", "."));
       if (!isFinite(v) || v < 0) { if (strict && !err) err = c[2] + " : saisis un nombre positif."; return; }
-      var cap = AD.pain ? s[c[0]] : Math.ceil(s[c[0]] * 1.1 * 10) / 10;
-      if (strict && v > cap && !err) err = c[2] + " : " + (AD.pain ? "pas d'augmentation en cas de douleur" : "maximum +10 % du prévu") + ".";
       out[c[0]] = c[0] === "km" ? r1(v) : Math.round(v);
     });
+    if ($("adTime") && $("adTime").value) { if (/^([01]\d|2[0-3]):[0-5]\d$/.test($("adTime").value)) out.time = $("adTime").value; else if (strict && !err) err = "Horaire invalide."; }
     if ($("adInt")) { var iv = String($("adInt").value).replace(/[\u0000-\u001f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 60); out.intensity = iv || s.intensity || null; }
-    out.err = err; return out;
+    out.incs = incsOf(s, out); out.err = err; return out;
   }
+  function incsOf(s, v) {
+    var l = [];
+    NUMF.forEach(function (c) {
+      var o = s[c[0]] || 0, n = v[c[0]] || 0; if (n <= o) return;
+      l.push({ f: c[0], label: c[2], unit: c[3], from: o, to: n, pct: o ? Math.round((n / o - 1) * 100) : null, big: o ? n > Math.ceil(o * 1.1 * 10) / 10 : true });
+    });
+    return l;
+  }
+  function captureMan(s) { if (!$("adInt")) return null; var v = formVals(s, propose(s, AD.reason, AD.opt, AD.pain), false); return { km: v.km, minutes: v.minutes, dplus: v.dplus, time: v.time, intensity: v.intensity }; }
   function updatePreview() {
     if (!AD || !AD.opt) return; var s = rawSession(AD.id); if (!s) return;
+    var w = $("adWarn"); if (w) w.innerHTML = ""; /* toute modification invalide l'avertissement affiché */
     var v = formVals(s, propose(s, AD.reason, AD.opt, AD.pain), false);
     var set = function (k, t) { var el = $("adP-" + k); if (el) el.innerHTML = "<b>" + esc(t || "—") + "</b>"; };
-    set("km", s.km ? fkm(v.km) + " km" : ""); set("min", s.minutes ? fmin(v.minutes) : ""); set("dp", s.dplus ? "+" + fint(v.dplus) + " m" : ""); set("int", v.intensity || "");
+    set("time", v.time ? ftime(v.time) : ""); set("km", v.km ? fkm(v.km) + " km" : (s.km ? "0 km" : "")); set("min", v.minutes ? fmin(v.minutes) : (s.minutes ? "0 min" : "")); set("dp", v.dplus ? "+" + fint(v.dplus) + " m" : (s.dplus ? "0 m" : "")); set("int", v.intensity || "");
   }
-  function applyAdaptForm() {
+  function showWarn(incs) {
+    var w = $("adWarn"); if (!w) return;
+    w.innerHTML = '<div class="warn" role="alert"><b>Augmentation importante</b><ul>' + incs.map(function (x) {
+      return "<li>" + esc(x.label) + " : " + esc(x.from ? fnum(x.from) + " → " + fnum(x.to) + " " + x.unit + " (+" + x.pct + " %)" : "ajout de " + fnum(x.to) + " " + x.unit) + "</li>";
+    }).join("") + "</ul><p>Une hausse brutale de distance, de durée, de dénivelé ou d'intensité augmente le risque de surcharge et de blessure (tendinites, périostite, fracture de fatigue). <b>Cette augmentation n'est pas recommandée par l'application.</b> Tu peux demander un avis à Claude avant de l'enregistrer.</p>" +
+      '<div class="row"><button class="btn" data-ask="' + esc(AD.id) + '">Demander à Claude</button><button class="btn btn-danger" data-aconfirm="1">Je confirme : enregistrer quand même</button></div></div>';
+    w.scrollIntoView({ block: "nearest" });
+  }
+  function fnum(x) { return String(Math.round(x * 10) / 10).replace(".", ","); }
+  function showInCalendar(date) {
+    state.prefs.weekStart = monday(date); state.prefs.month = date.slice(0, 7);
+    if ((state.prefs.view || "home") === "home" && date !== todayISO()) state.prefs.view = "week";
+  }
+  function applyAdaptForm(force) {
     if (!AD || !AD.opt) return; var s = rawSession(AD.id); if (!s) return;
     var r = propose(s, AD.reason, AD.opt, AD.pain), v = formVals(s, r, true);
     if (v.err) { toast(v.err); return; }
-    var after = { type: r.type, km: v.km, minutes: v.minutes, dplus: v.dplus, intensity: v.intensity };
+    if (AD.pain && v.incs.length) { toast("Douleur signalée : pas d'augmentation de " + v.incs.map(function (x) { return x.label.toLowerCase(); }).join(", ") + "."); return; }
+    var big = v.incs.filter(function (x) { return x.big; });
+    if (big.length && force !== true) { showWarn(big); return; }
+    var after = { type: r.type, km: v.km, minutes: v.minutes, dplus: v.dplus, time: v.time, intensity: v.intensity };
     if (sameSnap(snap(s), snap(after))) { toast("Aucun changement par rapport à la séance prévue."); return; }
-    var rs = reasonOf(AD.reason), st = adaptStore(true), label = rs.label.toLowerCase() + (AD.pain ? " + douleur" : ""), now = new Date().toISOString();
-    st[s.id] = { at: now, reason: AD.reason, label: label, note: r.note, pain: !!AD.pain, before: snap(s), after: after };
-    logAdapt({ at: now, sessionId: s.id, date: s.date, type: s.type, label: label, action: "adaptée", before: snap(s), after: after });
-    save(); var id = s.id; AD = null; render(); openSheet(id); toast("Séance adaptée. Tu peux revenir à l'original à tout moment.");
+    var rs = reasonOf(AD.reason), st = adaptStore(true), label = rs.label.toLowerCase() + (AD.pain ? " + douleur" : ""), now = new Date().toISOString(), forced = big.length > 0;
+    st[s.id] = { at: now, reason: AD.reason, label: label, note: r.note + (forced ? " Augmentation importante confirmée manuellement (non recommandée)." : ""), pain: !!AD.pain, big: forced, before: snap(s), after: after };
+    logAdapt({ at: now, sessionId: s.id, date: s.date, type: s.type, label: label, action: "adaptée", big: forced, before: snap(s), after: after });
+    showInCalendar(s.date); save(); closeSheet(); render(); toast(forced ? "Séance modifiée (augmentation confirmée). Retour possible à l'original." : "Séance adaptée. Tu peux revenir à l'original à tout moment.");
   }
   function revertAdapt(id) {
     var st = adaptStore(false), a = st && st[id]; if (!a) return;
@@ -495,14 +526,14 @@
     if (!li.length) return "";
     return '<section class="card"><h2>Séances adaptées</h2><p class="small muted">Adaptations actives, enregistrées sur ce téléphone. Les versions importées ne sont jamais modifiées.</p><ul class="diff">' + li.map(function (x) {
       var on = sameSnap(x.a.before, snap(x.raw));
-      return "<li><b>" + esc(fdate(x.raw.date)) + " · " + esc(x.raw.type) + '</b> <span class="pill p-modified">' + esc(x.a.label) + "</span>" + (on ? "" : ' <span class="pill p-removed">non appliquée</span>') +
+      return "<li><b>" + esc(fdate(x.raw.date)) + " · " + esc(x.raw.type) + '</b> <span class="pill p-modified">' + esc(x.a.label) + "</span>" + (x.a.big ? ' <span class="pill p-removed">hausse confirmée</span>' : "") + (on ? "" : ' <span class="pill p-removed">non appliquée</span>') +
         '<br><span class="small muted">' + (on ? "Prévu : " + esc(descr(x.a.before)) + "<br>Adapté : " + esc(descr(x.a.after)) : "La séance a changé dans la version importée : l'adaptation est ignorée.") + '</span><br><button class="linkbtn" data-arevert="' + esc(x.id) + '">' + (on ? "Revenir à l'original" : "Supprimer") + "</button></li>";
     }).join("") + "</ul></section>";
   }
   function adaptHistory() {
     var l = adaptLogOf(false).filter(function (e) { return isObj(e); }); if (!l.length) return "";
     return '<section class="card"><h2>Historique des adaptations</h2><p class="small muted">Séparé de l\'historique des versions : les programmes importés restent intacts.</p><ul class="diff small">' + l.slice(0, 30).map(function (e) {
-      return "<li>" + esc(new Date(e.at).toLocaleString("fr-FR")) + " · <b>" + esc(e.action) + "</b> · " + esc(e.date ? fdate(e.date) : "") + " · " + esc(e.type) + ' <span class="pill p-modified">' + esc(e.label) + "</span><br>" + esc(descr(e.before || {})) + " → <b>" + esc(descr(e.after || {})) + "</b></li>";
+      return "<li>" + esc(new Date(e.at).toLocaleString("fr-FR")) + " · <b>" + esc(e.action) + "</b> · " + esc(e.date ? fdate(e.date) : "") + " · " + esc(e.type) + ' <span class="pill p-modified">' + esc(e.label) + "</span>" + (e.big ? ' <span class="pill p-removed">hausse confirmée</span>' : "") + "<br>" + esc(descr(e.before || {})) + " → <b>" + esc(descr(e.after || {})) + "</b></li>";
     }).join("") + "</ul></section>";
   }
 
@@ -510,6 +541,7 @@
   function openAsk(id) {
     var s = rawSession(id) || findSession(id); if (!s) return;
     if (!AD || AD.id !== id) AD = { id: id, reason: null, opt: null, pain: false, ctx: "", from: "sheet" };
+    if (AD.opt && AD.view !== "ask") { var m0 = captureMan(rawSession(id) || s); if (m0) AD.man = m0; }
     AD.view = "ask"; renderAsk(); $("sheet").classList.add("open"); $("sheetBg").classList.add("open");
   }
   function askText(s) {
@@ -519,6 +551,10 @@
       "Séance : " + fdate(s.date) + " · " + descr(cur) + (s.goal ? " · objectif : " + s.goal : ""),
       "Raison : " + (rs ? rs.label + (AD.opt ? " (" + optLabel(rs, AD.opt) + ")" : "") : "à préciser"),
       "Douleur : " + (AD.pain ? "oui, je ressens une douleur" : "non signalée")];
+    if (AD.man) {
+      var mv = { type: s.type, time: AD.man.time, km: AD.man.km, minutes: AD.man.minutes, dplus: AD.man.dplus, intensity: AD.man.intensity }, bg = incsOf(s, mv).filter(function (x) { return x.big; });
+      if (!sameSnap(snap(s), snap(mv))) l.push("Modification que j'envisage : " + descr(mv) + (bg.length ? " (augmentation importante : dis-moi si c'est raisonnable et comment progresser)" : ""));
+    }
     if (AD.ctx) l.push("Précisions : " + AD.ctx);
     l.push("", "Demande :", "- Analyse mes dernières activités Strava et mon état de forme.",
       "- Propose une adaptation prudente de cette séance" + (AD.pain ? " (douleur signalée : ne propose ni plus long ni plus intense ; recommande un avis médical si elle persiste)" : "") + ", et ajuste les séances suivantes de la semaine si nécessaire.",
@@ -571,9 +607,10 @@
     if ((el = t.closest(".tabbar button"))) { setView(el.dataset.v); return; }
     if ((el = t.closest("[data-go]"))) { setView(el.dataset.go); return; }
     if ((el = t.closest("[data-adapt]"))) { openAdapt(el.dataset.adapt); return; }
-    if ((el = t.closest("[data-ar]"))) { if (AD) { AD.reason = el.dataset.ar; AD.opt = null; renderAdapt(); } return; }
-    if ((el = t.closest("[data-ao]"))) { if (AD) { AD.opt = el.dataset.ao; renderAdapt(); } return; }
-    if ((el = t.closest("[data-aapply]"))) { applyAdaptForm(); return; }
+    if ((el = t.closest("[data-ar]"))) { if (AD) { AD.reason = el.dataset.ar; AD.opt = null; AD.man = null; renderAdapt(); } return; }
+    if ((el = t.closest("[data-ao]"))) { if (AD) { AD.opt = el.dataset.ao; AD.man = null; renderAdapt(); } return; }
+    if ((el = t.closest("[data-aapply]"))) { applyAdaptForm(false); return; }
+    if ((el = t.closest("[data-aconfirm]"))) { applyAdaptForm(true); return; }
     if ((el = t.closest("[data-aback]"))) { AD = null; openSheet(el.dataset.aback); return; }
     if ((el = t.closest("[data-ask]"))) { openAsk(el.dataset.ask); return; }
     if ((el = t.closest("[data-acopy]"))) { copyAsk(); return; }
@@ -597,14 +634,14 @@
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (t.id === "fileIn") { if (t.files[0]) handleFile(t.files[0]); t.value = ""; return; }
-    if (t.id === "adPain" && AD) { AD.pain = t.checked; renderAdapt(); return; }
+    if (t.id === "adPain" && AD) { var s0 = rawSession(AD.id); AD.man = s0 && AD.opt ? captureMan(s0) : null; AD.pain = t.checked; renderAdapt(); return; }
     if (t.id === "verSel") { state.prefs.viewVersion = t.value; save(); render(); return; }
     if (t.dataset && t.dataset.check) { setChecked(t.dataset.check, t.checked); var open = $("sheet").classList.contains("open"); render(); if (open) openSheet(t.dataset.check); }
   });
   document.addEventListener("input", function (e) {
     var t = e.target;
     if (t.id === "adCtx" && AD) { AD.ctx = t.value.replace(/[\u0000-\u001f<>]/g, ""); var s = rawSession(AD.id) || findSession(AD.id); if (s && $("adPrompt")) $("adPrompt").value = askText(s); }
-    else if (t.id === "adKm" || t.id === "adMin" || t.id === "adDp" || t.id === "adInt") updatePreview();
+    else if (t.id === "adKm" || t.id === "adMin" || t.id === "adDp" || t.id === "adInt" || t.id === "adTime") updatePreview();
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); if (e.key === "Enter" && e.target.id === "nameIn") { e.preventDefault(); var b = document.querySelector('[data-act="savename"]'); if (b) b.click(); } });
 
